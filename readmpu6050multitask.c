@@ -655,8 +655,8 @@ bool readBurstFIFO(int file, FifoRAM *fifo, int numcapt, struct timespec rt_cpt_
 
 /*
 On va lire les données brutes
-Les données brutes sont mlises dans le FIFO
-Un processus de traitement vient conssomer les donner brutes pour y appliquer les traitements (filtre de Kalman, calcul d'angle, etc) et les met dans un autre FIFO pour les afficher
+Les données brutes sont mises dans le FIFO
+Un processus de traitement vient conssomer les donner brutes pour y appliquer les traitements (filtre de Kalman, calcul d'angle, etc)
 Les données sont ensuite mise dans un autre FIFO pour etre conssomer (affichage, stockage, etc)
 */
 
@@ -758,7 +758,7 @@ int main() {
         } 
         else{
             /*
-            * Lecture des capteurs en boqucle
+            * Lecture des capteurs en boucle
             */
             struct timespec t;  //Boucle temps reel
             struct timespec rt_cpt_clock[NBCAPTEURS];

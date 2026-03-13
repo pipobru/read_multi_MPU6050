@@ -37,32 +37,33 @@ Commandes pour tester le bus I2C en mode console :
 	sudo i2cdetect -y 1 ==> Scan du bus I2C 1
 	i2cset -y 1 0x70 0x01 ==> Activer le port 0 du multiplexeur 
 	i2cget -y 1 0x70 ==> Lire quel port est actif sur le multiplexeur
-Test du multiplexer:
-	bruno@pipobru:~ $ i2cset -y 1 0x70 0x00 ==> On désactive tous les ports du multiplexeur
-	bruno@pipobru:~ $ i2cdetect -y 1
-	     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-	00:                         -- -- -- -- -- -- -- --
-	10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	70: 70 -- -- -- -- -- -- --
-	==> On ne voit plus que le multiplexeur car il ne replay plus rien
 
-	bruno@pipobru:~ $ i2cset -y 1 0x70 0x01 ==> On active le port 1 sur le multiplexeur 
-	bruno@pipobru:~ $ i2cdetect -y 1
-	     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-	00:                         -- -- -- -- -- -- -- --
-	10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	60: -- -- -- -- -- -- -- -- 68 -- -- -- -- -- -- --
-	70: 70 -- -- -- -- -- -- --
-	==> On voit bien apparaitre le capteur à l’adresse 0x68
+	Test du multiplexer:
+		i2cset -y 1 0x70 0x00 ==> On désactive tous les ports du multiplexeur
+		i2cdetect -y 1
+	 	    0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+		00:                         -- -- -- -- -- -- -- --
+		10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		70: 70 -- -- -- -- -- -- --
+		==> On ne voit plus que le multiplexeur car il ne replay plus rien
+
+		i2cset -y 1 0x70 0x01 ==> On active le port 1 sur le multiplexeur 
+		i2cdetect -y 1
+		     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+		00:                         -- -- -- -- -- -- -- --
+		10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		60: -- -- -- -- -- -- -- -- 68 -- -- -- -- -- -- --
+		70: 70 -- -- -- -- -- -- --
+		==> On voit bien apparaitre le capteur à l’adresse 0x68
 	
 
 ## Construit avec

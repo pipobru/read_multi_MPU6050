@@ -64,9 +64,6 @@ Commandes pour tester le bus I2C en mode console :
 		60: -- -- -- -- -- -- -- -- 68 -- -- -- -- -- -- --
 		70: 70 -- -- -- -- -- -- --
 		==> On voit bien apparaitre le capteur à l’adresse 0x68
-		
-	Affichage lors de l'execution du programme
-	<img width="655" height="322" alt="image" src="https://github.com/user-attachments/assets/a76381c7-3238-4146-b926-e41350088a8b" />
 
 
 ## Construit avec

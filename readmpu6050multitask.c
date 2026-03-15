@@ -34,6 +34,7 @@
 #define DATA_IN_FIFO      0xF8
 #define NBCAPTEURS        5
 #define ACTIVE_KALMAN     1
+#define LOGFILE           1
 
 /*
 * Definition de la structure pour le filtre de Kalman
@@ -160,6 +161,16 @@ typedef struct {
 
 } CAPTEUR_Data_set;
 
+typedef struct {
+    pthread_mutex_t mutex;
+    float cumulgx[NBCAPTEURS]; //Cumul de la rotation sur les 3 axes
+    float cumulgy[NBCAPTEURS]; //Cumul de la rotation sur les 3 axes
+    float cumulgz[NBCAPTEURS]; //Cumul de la rotation sur les 3 axes
+} CumulAngle;
+
+CumulAngle *cumulangle = NULL;
+
+
 /* ═══════════════════════════════════════════════════════════════════════════
    FIFO partagé (ring buffer + sémaphores)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -237,6 +248,8 @@ typedef struct {
     volatile int       running;
     pthread_mutex_t    mtx;
 } SharedFlag;
+
+SharedFlag *flag = NULL;
 
 static void flag_stop(SharedFlag *f) {
     pthread_mutex_lock(&f->mtx);
@@ -332,15 +345,15 @@ void initallcapteur(int file_multi, int file_capteur){
     // Disable FSYNC and set accelerometer and gyro bandwidth to 44 and 42 Hz, respectively; 
     // DLPF_CFG = bits 2:0 = 010; this sets the sample rate at 1 kHz for both
     param[0] = 0x1A;
-	param[1] = 0x03; // ~42 Hz
-//	param[1] = 0x01; // ~188 Hz
+//	param[1] = 0x03; // ~42 Hz
+	param[1] = 0x01; // ~188 Hz
 	_write(file_capteur, param, 2);
 
     // Sample rate = 1kHz
     param[0] = 0x19;
 //    param[1] = 0x07;
-//    param[1] = 0x00;
-    param[1] = 0x09;
+    param[1] = 0x00;
+//    param[1] = 0x09; // 1kHz sample rate (0x00 = 8kHz, 0x07 = 1kHz) 0x9 = 100 (Fonctionne)
     _write(file_capteur, param, 2);
     
     //Configuration de la plage des gyro
@@ -382,7 +395,7 @@ Double :  ╔ ╗ ╚ ╝ ═ ║ ╠ ╣ ╦ ╩ ╬
 Épais  :  ┏ ┓ ┗ ┛ ━ ┃ ┣ ┫ ┳ ┻ ╋
 */
 
-void affichage(CAPTEUR_Data_set data_cpt, bool firstdisplay){
+void affichage(CAPTEUR_Data_set data_cpt, bool firstdisplay, float *cumultime){
     //printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
     std::ostringstream buffer;
     int delta_aff = 10; //Nombre de ligne de l'affichage (pour se positionner au bon endroit)//On laisse les ligne avec les messages de start
@@ -403,15 +416,23 @@ void affichage(CAPTEUR_Data_set data_cpt, bool firstdisplay){
         printf(   "┣────────────────┼──────────────┼──────────────┼──────────────┼──────────────┼─────────────┫\n");
         printf(   "┃ Temperature    │              │              │              │              │             ┃\n");
         printf(   "┣────────────────┼──────────────┼──────────────┼──────────────┼──────────────┼─────────────┫\n");
-        printf(   "┃ Gyro         X │              │              │              │              │             ┃\n");
+        printf(   "┃ Gyro (brut)  X │              │              │              │              │             ┃\n");
+        printf(   "┃ Gyro (corrige) │              │              │              │              │             ┃\n");
         printf(   "┣────────────────┼──────────────┼──────────────┼──────────────┼──────────────┼─────────────┫\n");
-        printf(   "┃ Gyro         Y │              │              │              │              │             ┃\n");
+        printf(   "┃ Gyro (brut)  Y │              │              │              │              │             ┃\n");
+        printf(   "┃ Gyro (corrige) │              │              │              │              │             ┃\n");
         printf(   "┣────────────────┼──────────────┼──────────────┼──────────────┼──────────────┼─────────────┫\n");
         printf(   "┃ Gyro         Z │              │              │              │              │             ┃\n");
         printf(   "┣────────────────┼──────────────┼──────────────┼──────────────┼──────────────┼─────────────┫\n");
         printf(   "┃ dt.            │              │              │              │              │             ┃\n");
         printf(   "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n");
-
+        if(LOGFILE){
+            FILE *f = fopen("gyro_log.csv", "w");
+            if (f) {
+                fprintf(f, "Time;RawX;AngleX_Kalman;RawY;AngleY_Kalman;RawZ;\n");
+                fclose(f);
+            }
+        }
     }
  
     //Position Y
@@ -454,6 +475,17 @@ void affichage(CAPTEUR_Data_set data_cpt, bool firstdisplay){
             break;
     }
 
+    /*
+    pthread_mutex_lock(&cumulangle->mutex);
+    float cux = cumulangle->cumulgx[data_cpt.numcpt];
+    float cuy = cumulangle->cumulgy[data_cpt.numcpt];
+    float cuz = cumulangle->cumulgz[data_cpt.numcpt];
+    pthread_mutex_unlock(&cumulangle->mutex);
+    */
+    float cux = data_cpt.brut_gx;
+    float cuy = data_cpt.brut_gy;
+    float cuz = data_cpt.brut_gz;
+
     delta_aff--;
     printf("\033[?25l");   // cacher le curseur
     y = 4+delta_aff;
@@ -468,33 +500,53 @@ void affichage(CAPTEUR_Data_set data_cpt, bool firstdisplay){
     y = 10+delta_aff;
     printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
     printf("%9.5f", data_cpt.temperature);
+
     y = 12+delta_aff;
     printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
-    printf("%9.5f", data_cpt.gx);
-    y = 14+delta_aff;
+    printf("%9.5f", cux);
+    y = 13+delta_aff;
     printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
-    printf("%9.5f", data_cpt.gy);
+    printf("%9.5f", data_cpt.gx);
+
+    y = 15+delta_aff;
+    printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne Hq
+
+    printf("%9.5f", cuy);
     y = 16+delta_aff;
     printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
-    printf("%9.5f", data_cpt.gz);
+    printf("%9.5f", data_cpt.gy);
+
     y = 18+delta_aff;
     printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
-    printf("%9.5f", data_cpt.dt);
+    printf("%9.5f", data_cpt.gz);
+    y = 20+delta_aff;
+    printf("\033[%d;%dH", y, x);  // ESC [ ligne ; colonne H
+    printf("%9.5f", 1/data_cpt.dt);
 
     printf("\033[%d;%dH", delta_aff+20, 0);  // Positionne le curseur apres le tableau
     printf("\033[?25h");   // réafficher le curseur
+    *cumultime += data_cpt.dt;
+    if(LOGFILE){
+            FILE *f = fopen("gyro_log.csv", "a");
+            if (f) {
+                fprintf(f, "%f;%f;%f;%f;%f;%f;\n", *cumultime, cux, data_cpt.gx, cuy, data_cpt.gy, cuz);
+                fclose(f);
+            }
+        }
 }
 
 /*
 * Permet de conssomer les données (apres leurs traitements)
 */
-static void consumer(FifoRAM *fifo, SharedFlag *flag){
+static void consumer(FifoRAM *fifo){
     printf(" DEBUG : [IN consumer pid=%d] démarré\n", getpid());
     CAPTEUR_Data_set data_cpt;
     bool firstdisplay = true;
+    float cumultime = 0.0;
+
     while (flag->running) {
         if(fifo_pop(fifo, &data_cpt)){
-            affichage(data_cpt, firstdisplay);
+            affichage(data_cpt, firstdisplay, &cumultime);
             if(firstdisplay) firstdisplay = false;
         }
         else{ //Pas de data, on temporise
@@ -507,7 +559,7 @@ static void consumer(FifoRAM *fifo, SharedFlag *flag){
 /*
 * Permet de faire les traitements sur les données apres lecture des capteurs
 */
-static void traitements(FifoRAM *fifo, FifoRAM *fifocustomer, SharedFlag *flag){
+static void traitements(FifoRAM *fifo, FifoRAM *fifocustomer){
     printf(" DEBUG : [IN traitements pid=%d] démarré\n", getpid());
     //Application des traitements sorties de capteurs (Datasheet)
     CAPTEUR_Data_set data_cpt;
@@ -522,6 +574,12 @@ static void traitements(FifoRAM *fifo, FifoRAM *fifocustomer, SharedFlag *flag){
     //Tant qu'il y a des données dans le FIFO
     while (flag->running) {
         if(fifo_pop(fifo, &data_cpt)){
+            /* ── Seuil de zéro : ignorer le bruit sous 0.1 °/s ── */
+            /* @TODO à degager la division par zero pas belle !!!!*/
+            if (data_cpt.brut_ax < 0.1f && data_cpt.brut_ax > -0.1f) data_cpt.gx = 0.0f;
+            if (data_cpt.brut_gy < 0.1f && data_cpt.brut_gy > -0.1f) data_cpt.gy = 0.0f;
+            if (data_cpt.brut_gz < 0.1f && data_cpt.brut_gz > -0.1f) data_cpt.gz = 0.0f;
+
             data_cpt.ax = (float)data_cpt.brut_ax / 16384.0f; //Convertir les données brutes en g
             data_cpt.ay = (float)data_cpt.brut_ay / 16384.0f; //Convertir les données brutes en g
             data_cpt.az = (float)data_cpt.brut_az / 16384.0f; //Convertir les données brutes en g
@@ -531,6 +589,21 @@ static void traitements(FifoRAM *fifo, FifoRAM *fifocustomer, SharedFlag *flag){
             data_cpt.gz = (float)data_cpt.brut_gz / 131.0f; //Convertir les données brutes en deg/s
 
             data_cpt.temperature = (float)(data_cpt.brut_temperature / 340.0f) + 36.53f; //Convertir les données brutes en °C
+
+            data_cpt.brut_gx = data_cpt.gx;
+            data_cpt.brut_gy = data_cpt.gy;
+            data_cpt.brut_gz = data_cpt.gz;
+
+            /*
+            * Ne fonctionne pas bien, on a des valeurs de cumul qui partent en vrille (tres grand ou tres petit) et qui ne correspondent pas à la réalité
+            */
+           /*
+            pthread_mutex_lock(&cumulangle->mutex);
+            cumulangle->cumulgx[data_cpt.numcpt] += data_cpt.gx*data_cpt.dt;
+            cumulangle->cumulgy[data_cpt.numcpt] += data_cpt.gy*data_cpt.dt;
+            cumulangle->cumulgz[data_cpt.numcpt] += data_cpt.gz*data_cpt.dt;
+            pthread_mutex_unlock(&cumulangle->mutex);
+            */
 
             if(ACTIVE_KALMAN){
                 float X = atan2f(data_cpt.ay, data_cpt.az) * (180.0f / M_PI);
@@ -553,6 +626,7 @@ static void traitements(FifoRAM *fifo, FifoRAM *fifocustomer, SharedFlag *flag){
     }
     exit(EXIT_SUCCESS);
 }
+
 void resetFIFO(int file)
 {
     uint8_t data[2];
@@ -574,10 +648,33 @@ uint16_t readFIFOCount(int file)
 /*
 * Permet de mesuer le temps ecoulé depuis la derniere itération
 */
+/*
+// Pour un dt physique (gyroscope, intégration) → float en secondes
+float dt = (float)(a->tv_sec  - b->tv_sec)
+         + (float)(a->tv_nsec - b->tv_nsec) * 1e-9f;
+
+// Pour mesurer des durées précises (profiling, logs) → int64_t en µs
+int64_t dt_us = (int64_t)(a->tv_sec  - b->tv_sec) * 1000000LL
+              + (int64_t)(a->tv_nsec - b->tv_nsec) / 1000LL;
+*/
+float timespec_diff_sec(struct timespec *a, struct timespec *b)
+{
+    return (float)(a->tv_sec  - b->tv_sec)
+                 + (float)(a->tv_nsec - b->tv_nsec) * 1e-9f; 
+}
+
 int64_t timespec_diff_us(struct timespec *a, struct timespec *b)
 {
+    
     return (int64_t)(a->tv_sec  - b->tv_sec ) * 1000000LL
          + (int64_t)(a->tv_nsec - b->tv_nsec) / 1000LL;
+    
+    
+    /*
+    return (int64_t)(a->tv_sec  - b->tv_sec)
+                 + (a->tv_nsec - b->tv_nsec) * 1e-9f; 
+    */
+    
 }
 void timespec_add_ns(struct timespec *ts, long ns)
 {
@@ -628,9 +725,16 @@ bool readBurstFIFO(int file, FifoRAM *fifo, int numcapt, struct timespec rt_cpt_
     //Lecture de l'horloge RT
     struct timespec rt_clock;
     clock_gettime(CLOCK_MONOTONIC, &rt_clock); //Recupere l'heure de l'horloge temps reel  
-    float dt = (float) timespec_diff_us(&rt_clock, &rt_cpt_clock[numcapt]);
-	dt = dt/1000000.0;  //Convertir en seconde
+ 
+    //    float dt = (float) timespec_diff_us(&rt_clock, &rt_cpt_clock[numcapt]);
+//	dt = dt/1000000.0;  //Convertir en seconde
+
+    float dt = (rt_clock.tv_sec  - rt_cpt_clock[numcapt].tv_sec)
+                 + (rt_clock.tv_nsec - rt_cpt_clock[numcapt].tv_nsec) * 1e-9f;
+
     rt_cpt_clock[numcapt] = rt_clock;
+
+  //  dt = timespec_diff_sec(&rt_clock, &rt_cpt_clock[numcapt]);
     data_cpt.dt = dt;
 
     if(_read(file, buffer, 14)){
@@ -662,7 +766,7 @@ Les données sont ensuite mise dans un autre FIFO pour etre conssomer (affichage
 
 int main() {
     /* Lance le thread d'écoute pour la saisie du caractere d'arret*/
-    SharedFlag *flag = (SharedFlag *)mmap(NULL, sizeof(SharedFlag), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    flag = (SharedFlag *)mmap(NULL, sizeof(SharedFlag), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
     /* Initialisation du mutex en mode PARTAGÉ entre processus */
     pthread_mutexattr_t attr;
@@ -685,6 +789,17 @@ int main() {
     //Initialisation des capteurs pour utiliser leur FIFO, frequence et parametre plage accelerometre
     initallcapteur(file_multi, file_capteur);
 
+    /* Créer le segment partagé CumulAngle *cumulangle = NULL;*/
+    cumulangle = (CumulAngle *)mmap(NULL, sizeof(CumulAngle),
+                        PROT_READ | PROT_WRITE,
+                        MAP_SHARED | MAP_ANONYMOUS,
+                        -1, 0);
+    pthread_mutexattr_t attr2;
+    pthread_mutexattr_init(&attr2);
+    pthread_mutexattr_setpshared(&attr2, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&cumulangle->mutex, &attr2);
+    pthread_mutexattr_destroy(&attr2); 
+  
     /*
     * Initialisation des FIFO pour partager les données entre les taches 
     */
@@ -739,21 +854,23 @@ int main() {
 
       /* ── 4. Fork : main lit les capteurs traitement traite ── */
     pid_t pid, pid_consumer;
+//    pthread_atfork(before_fork, after_parent, after_child);
     pid = fork(); //Creatioin du processus de traitement des données (filtre de Kalman, calcul d'angle, etc)
      if (pid < 0) { perror("fork"); return EXIT_FAILURE; }
 
     if (pid == 0) {
         //Fonction de traitement des données (filtre de Kalman, calcul d'angle, etc)
-        traitements(fifo, fifocustomer, flag);      /* tache qui traite les données sorties de capteurs */
+        traitements(fifo, fifocustomer);      /* tache qui traite les données sorties de capteurs */
         exit(0);
     } 
     else{
         //Creation de la tache pour conssomer les datas
+//        pthread_atfork(before_fork, after_parent, after_child);
         pid_consumer = fork();
         if (pid_consumer < 0) { perror("fork"); return EXIT_FAILURE;}
         if (pid_consumer == 0) {
             //Fonction de traitement des données (filtre de Kalman, calcul d'angle, etc)
-            consumer(fifocustomer, flag);      /* tache qui traite les données sorties de capteurs */
+            consumer(fifocustomer);      /* tache qui traite les données sorties de capteurs */
             exit(0);
         } 
         else{
@@ -762,13 +879,19 @@ int main() {
             */
             struct timespec t;  //Boucle temps reel
             struct timespec rt_cpt_clock[NBCAPTEURS];
+            float cumulanglecpt[NBCAPTEURS] = {0}; //Cumul de la rotation pour chaque capteur
 
             for(int t=0; t<NBCAPTEURS; t++){
                 clock_gettime(CLOCK_MONOTONIC, &rt_cpt_clock[t]);
+                pthread_mutex_lock(&cumulangle->mutex);
+                cumulangle->cumulgx[t] = 0;
+                cumulangle->cumulgy[t] = 0;
+                cumulangle->cumulgz[t] = 0;
+                pthread_mutex_unlock(&cumulangle->mutex);
             }
 
             while(flag->running){
-                timespec_add_ns(&t, 1000000L);
+                timespec_add_ns(&t, 2000000L); //Les capteurs crachent à 200Hz pas besoin d'aller plus que 500Hz pour les cycles de lecture
                 char numcapteur = 0;
                 for (char i = 0; i < 8; i++) { //8 est le nb max de capteur sur le multiplexeur
                     //Si port actif
@@ -790,7 +913,8 @@ int main() {
                         numcapteur ++;
                     }
                 }
-                clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, NULL); //Attente de 1ms (donc 1Khz)
+                clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, NULL); //Attente de xx depuis le debut de la boucle (temps reel) pour la prochaine lecture des capteurs
+//                sleep(1);
             }
         }
     }
